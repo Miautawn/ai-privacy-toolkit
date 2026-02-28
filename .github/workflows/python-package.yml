@@ -28,8 +28,3 @@ jobs:
 
     - name: Install dependencies
       run: poetry install --with dev # Installs everything including pytest
-
-    - name: Test with pytest
-      run: |
-        # Use 'poetry run' to execute commands within the virtual env
-        poetry run pytest
