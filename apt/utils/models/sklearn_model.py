@@ -1,19 +1,22 @@
 from typing import Optional
 
-from sklearn.base import BaseEstimator
-
-from apt.utils.models import Model, ModelOutputType, get_nb_classes
-from apt.utils.datasets import Dataset, ArrayDataset, OUTPUT_DATA_ARRAY_TYPE
-
-from art.estimators.classification.scikitlearn import SklearnClassifier as ArtSklearnClassifier
+import pandas as pd
+from art.estimators.classification.scikitlearn import (
+    SklearnClassifier as ArtSklearnClassifier,
+)
 from art.estimators.regression.scikitlearn import ScikitlearnRegressor
 from art.utils import check_and_transform_label_format
+from sklearn.base import BaseEstimator
+
+from apt.utils.datasets import OUTPUT_DATA_ARRAY_TYPE, ArrayDataset, Dataset
+from apt.utils.models import Model, ModelOutputType, get_nb_classes
 
 
 class SklearnModel(Model):
     """
     Wrapper class for scikitlearn models.
     """
+
     def score(self, test_data: Dataset, **kwargs):
         """
         Score the model using test data.
@@ -22,7 +25,11 @@ class SklearnModel(Model):
         :type train_data: `Dataset`
         :return: the score as float (for classifiers, between 0 and 1)
         """
-        return self.model.score(test_data.get_samples(), test_data.get_labels(), **kwargs)
+
+        X = pd.DataFrame(test_data.get_samples(), columns=test_data.features_names)
+        y = test_data.get_labels()
+
+        return self.model.score(X, y, **kwargs)
 
 
 class SklearnClassifier(SklearnModel):
@@ -43,9 +50,18 @@ class SklearnClassifier(SklearnModel):
                               queries that can be submitted. Default is True.
     :type unlimited_queries: boolean, optional
     """
-    def __init__(self, model: BaseEstimator, output_type: ModelOutputType, black_box_access: Optional[bool] = True,
-                 unlimited_queries: Optional[bool] = True, **kwargs):
-        super().__init__(model, output_type, black_box_access, unlimited_queries, **kwargs)
+
+    def __init__(
+        self,
+        model: BaseEstimator,
+        output_type: ModelOutputType,
+        black_box_access: Optional[bool] = True,
+        unlimited_queries: Optional[bool] = True,
+        **kwargs,
+    ):
+        super().__init__(
+            model, output_type, black_box_access, unlimited_queries, **kwargs
+        )
         self._art_model = ArtSklearnClassifier(model, preprocessing=None)
 
     def fit(self, train_data: ArrayDataset, **kwargs) -> None:
@@ -91,9 +107,21 @@ class SklearnRegressor(SklearnModel):
                               queries that can be submitted. Default is True.
     :type unlimited_queries: boolean, optional
     """
-    def __init__(self, model: BaseEstimator, black_box_access: Optional[bool] = True,
-                 unlimited_queries: Optional[bool] = True, **kwargs):
-        super().__init__(model, ModelOutputType.REGRESSION, black_box_access, unlimited_queries, **kwargs)
+
+    def __init__(
+        self,
+        model: BaseEstimator,
+        black_box_access: Optional[bool] = True,
+        unlimited_queries: Optional[bool] = True,
+        **kwargs,
+    ):
+        super().__init__(
+            model,
+            ModelOutputType.REGRESSION,
+            black_box_access,
+            unlimited_queries,
+            **kwargs,
+        )
         self._art_model = ScikitlearnRegressor(model)
 
     def fit(self, train_data: Dataset, **kwargs) -> None:
