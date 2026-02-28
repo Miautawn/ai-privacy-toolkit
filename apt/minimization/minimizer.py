@@ -82,6 +82,9 @@ class GeneralizeToRepresentative(BaseEstimator, MetaEstimatorMixin, TransformerM
                                        False indicates that the `generalizations` structure should be used.
                                        Default is True.
     :type generalize_using_transform: boolean, optional
+    :type guaranteed_k_anonymity: int, optional. If provided, will limit the minimum number of datapoints in the DT leaves.
+                                    This increases the generalization outright reducing the need for DT uprooting,
+                                    but has a direct tradeoff in accuracy
     """
 
     def __init__(
@@ -96,6 +99,7 @@ class GeneralizeToRepresentative(BaseEstimator, MetaEstimatorMixin, TransformerM
         train_only_features_to_minimize: Optional[bool] = True,
         is_regression: Optional[bool] = False,
         generalize_using_transform: bool = True,
+        guaranteed_k_anonymity: Optional[int] = 1,
     ):
         self.estimator = estimator
         if estimator is not None and not issubclass(estimator.__class__, Model):
@@ -130,6 +134,12 @@ class GeneralizeToRepresentative(BaseEstimator, MetaEstimatorMixin, TransformerM
         self._dt = None
         self._features = None
         self._level = 0
+        self.guaranteed_k_anonymity = guaranteed_k_anonymity
+
+        assert self.guaranteed_k_anonymity >= 1, (
+            "guaranteed_k_anonymity should be at least 1"
+        )
+
         if cells:
             self._calculate_generalizations()
 
@@ -363,13 +373,20 @@ class GeneralizeToRepresentative(BaseEstimator, MetaEstimatorMixin, TransformerM
             self.cells = []
             self._categorical_values = {}
 
+            # CONTRIBUTION: Add guaranteed_k_anonymity parameter to the initial DT fit,
+            # to limit the minimum number of samples in the leaves and therefore increase the generalization of the initial tree,
+            # which can lead to better accuracy and faster convergence to the target accuracy during the pruning process.
             if self.is_regression:
                 self._dt = DecisionTreeRegressor(
-                    random_state=10, min_samples_split=2, min_samples_leaf=1
+                    random_state=10,
+                    min_samples_split=2,
+                    min_samples_leaf=self.guaranteed_k_anonymity,
                 )
             else:
                 self._dt = DecisionTreeClassifier(
-                    random_state=0, min_samples_split=2, min_samples_leaf=1
+                    random_state=0,
+                    min_samples_split=2,
+                    min_samples_leaf=self.guaranteed_k_anonymity,
                 )
 
             # prepare data for DT
