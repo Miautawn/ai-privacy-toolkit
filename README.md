@@ -121,9 +121,9 @@ Please see a working example in the [guaranteed_k_anonymity.ipynb](./notebooks/c
 2. Added the [guaranteed_k_anonymity.ipynb](./notebooks/contribution/guaranteed_k_anonymity.ipynb) notebook to demonstrate the benefit of this contribution.
 
 ### Sensitvity Weights
-> Currently, the initially trained surrogate is weaker than the desired accuracy threshold, the algorithm selectively degeneralized features completely. It does so by weighting the reveal of information by the accuracy gained, **however doesn't take into account the real-world sensitivity of features.**
+> Currently, if the initially trained surrogate is weaker than the desired accuracy threshold, the algorithm selectively degeneralizes features completely. It does so by weighting the reveal of information by the accuracy gained, **however it doesn't take into account the real-world contextual sensitivity of features.**
 
-We introduce `sensitivity_weights` parameter which allows the us to insert domain knowledge into the degeneralization logic. For example, if we know that `age` is incredibly sensitive feature, we can prevent the algorithm from degeneralizing it by setting an explicitly higher weight for it:
+We introduce `sensitivity_weights` parameter which allows the us to insert domain knowledge into the degeneralization logic. For example, if we know that `age` is an incredibly sensitive feature, we can prevent the algorithm from degeneralizing it by setting an explicitly higher weight for it:
 ```python
 minimizer = default_minimizer = GeneralizeToRepresentative(
     model,
@@ -176,6 +176,11 @@ We add the `get_dynamic_generalizations(known_features: dict)` function which dy
 Under the hood, it takes the current leves (i.e. cells) of the surrogate model and eliminates those for which the `known_features` are outside their ranges. Then we recalculate the generalizations for the surviving leaves. It may be that all of surviving leaves point to the same label, meaning that we can use the currently known features to get the final prediction - eliminating the need for asking for all of the information!
 
 ```python
+minimizer = GeneralizeToRepresentative(
+    model,
+    guaranteed_k_anonymity=1,  # must set it to form homogenous leaves
+)
+
 current_form = minimizer.get_dynamic_generalizations({"age": 32})
 
 # print(current_form["ranges"]) will print consolidated generalizations
