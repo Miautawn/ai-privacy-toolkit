@@ -48,15 +48,31 @@ A Python library for Machine Learning Security. Includes an attack module called
 (membership inference, attribute inference, model inversion and database reconstruction) as well as a *privacy* metrics module that contains
 membership leakage metrics for ML models.
 
+[adversarial-robustness-toolbox](https://github.com/Trusted-AI/adversarial-robustness-toolbox):
+A Python library for Machine Learning Security. Includes an attack module called *inference* that contains privacy attacks on ML models
+(membership inference, attribute inference, model inversion and database reconstruction) as well as a *privacy* metrics module that contains
+membership leakage metrics for ML models.
+
+
+
 
 ## Contribution Description
 
 This fork offers the following contributions:
-- [Repository Refresh](#repository-refresh) - updates the dependencies such that the code could be run on modern Python package ecosystem and fix several compatability issues.
+- [Repository Refresh & Performance Improvements](#repository-refresh--performance-improvements) - updates project to modern Python package ecosystem. Adds automated code-formatting. Speeds up `GeneralizeToRepresentative` with vectorized math optimizations.
+
 - [Guaranteed K-anonymity](#guaranteed-k-anonymity) - adds a new parameter `guaranteed_k_anonymity` to the `GeneralizeToRepresentative` class that allows you to increase the minimum samples in the leaves of the starting decision tree, leading to higher generalization.
 
-### Repository Refresh
-> The project dependencies were updated to modern Python (3.11) package ecosystem versions and compatability issues fixed. Introduced proper dependency specification locks via [Poetry](https://python-poetry.org/) project manager. Code formatting tools added via pre-commit hooks.
+- [Sensitvity Weights](#guaranteed-k-anonymity) - adds a new parameter `sensitivity_weights` to the `GeneralizeToRepresentative` class that allows discouraging the accuracy improvement algorithm from degeneralizing contextually sensitive features.
+
+
+- [Dynamic Generalization](#dynamic-generalization) - adds a `get_dynamic_generalizations` function that dynamically calculates & updates generalizations based on provided partial feature values.
+
+> **NOTE**: Most of the contributions are linked to the code changes in the **glossary** sections. However, you can find all the changes by viewing the main [minimizer.py](./apt/minimization/minimizer.py) script and searching for "CONTRIBUTION" tags
+
+
+### Repository Refresh & Performance Improvements
+> Original repository is dated. We updated it to modern Python (3.11) package ecosystem versions and fixed compatability issues. Introduced proper dependency specification locks via [Poetry](https://python-poetry.org/) project manager. Code formatting tools added via pre-commit hooks. Optimized `GeneralizeToRepresentative` with vectorized math optimizations.
 
 #### Setup Instructions
 You can instal necessary dependencies and pre-commit hooks via:
@@ -72,8 +88,9 @@ After which, you can run a proper generalization example via [minimization_adult
 2. Added code automated code formatting ([here](./pyproject.toml))
 3. Made new package compatability changes (mainly for newer numpy versions) (here)
 4. Resolved the `UserWarnings` that were caused by fitting the minimizer with named features while running inference on raw numpy arrays (here)
-5. Added `calculate_disclosure_risk` function to calculate the "Disclosure Risk" metric as introduced in the original paper ([here](./apt/utils/metrics/metrics.py)).
-6. Added an updated [minimization_adult_new.ipynb](./notebooks/contribution/minimization_adult_new.ipynb) notebook to demonstrate working base functionality after above changes ([here](./notebooks/contribution/minimization_adult_new.ipynb))
+5. **Optimized key calculations to use vectorized math operations inside the "accuracy improvement" loop of `GeneralizeToRepresentative`.** This allows the minimization algorithm to run on normal-sized datasets (previously even 1k of data points would take minutes) (here)
+6. Added `calculate_disclosure_risk` function to calculate the "Disclosure Risk" metric as introduced in the original paper ([here](./apt/utils/metrics/metrics.py)).
+7. Added an updated [minimization_adult_new.ipynb](./notebooks/contribution/minimization_adult_new.ipynb) notebook to demonstrate working base functionality after above changes ([here](./notebooks/contribution/minimization_adult_new.ipynb))
 
 ### Guaranteed k-anonymity
 >The original codebase hardcodes the surrogate decision tree to split until it reaches perfectly homogeneous leaves, which often results in hyper-specific clusters containing only a single or a few data points. Then, it relies on the uprooting algorithm to retroactively increase generalizations by pruning these highly specific branches. However, if the accuracy drops below the threshold too quickly, this pruning is halted, leaving those micro-clusters exposed and highly vulnerable to **identity disclosure attacks**.
@@ -88,11 +105,97 @@ minimizer = default_minimizer = GeneralizeToRepresentative(
 )
 ```
 
+Under the hood, it directly sets the `min_samples_leaves` parameter for scikit-learn DecisionTree models:
+```python
+def fit():
+  ...
+  self._dt = DecisionTreeClassifier(
+      min_samples_leaf=self.guaranteed_k_anonymity, # <- we control this
+  )
+  ...
+```
+
 Please see a working example in the [guaranteed_k_anonymity.ipynb](./notebooks/contribution/guaranteed_k_anonymity.ipynb) notebook for more details It shows you how increasing this paramter can lead to better generalization (i.e. reduced disclosure risk) and lower loss of accuracy.
 
 #### Contribution glossary
 1. Added the `guaranteed_k_anonymity` parameter to the original `GeneralizeToRepresentative` transformer (here)
 2. Added the [guaranteed_k_anonymity.ipynb](./notebooks/contribution/guaranteed_k_anonymity.ipynb) notebook to demonstrate the benefit of this contribution.
+
+### Sensitvity Weights
+> Currently, the initially trained surrogate is weaker than the desired accuracy threshold, the algorithm selectively degeneralized features completely. It does so by weighting the reveal of information by the accuracy gained, **however doesn't take into account the real-world sensitivity of features.**
+
+We introduce `sensitivity_weights` parameter which allows the us to insert domain knowledge into the degeneralization logic. For example, if we know that `age` is incredibly sensitive feature, we can prevent the algorithm from degeneralizing it by setting an explicitly higher weight for it:
+```python
+minimizer = default_minimizer = GeneralizeToRepresentative(
+    model,
+    sensitivity_weights = {'age': 10} # default weight is 1
+
+)
+```
+
+During the "accuracy improvement" stage, we multiply the feature's NCP score with their weights, thus ranking them lower in the feature candidate list:
+```python
+def _get_feature_to_remove():
+  ...
+  for feature in self.features:
+    feature_ncp = self._calculate_ncp_for_feature_from_cells()
+
+    weight = self.sensitivity_weights.get(feature, 1.0)
+    feature_ncp = feature_ncp * weight
+  ...
+```
+
+Additionally, we use the weighted average for the final dataset NCP calculation after training (see the `_calc_ncp_for_generalization()` function):
+```python
+def _calc_ncp_for_generalization():
+  total_ncp = 0
+  total_weight = 0
+  ...
+
+  for feature in self.features:
+    total_ncp += self._calc_ncp(feature)
+    total_weight += self.sensitivity_weights.get(feature, 1.0)
+
+  ...
+  return total_ncp / total_weight
+```
+
+Please see a working example in [sensitivity_weights.ipynb](./notebooks/contribution/sensitivity_weights.ipynb) notebook.
+
+#### Contribution glossary
+1. Added the `sensitivity_weights` parameter to the original `GeneralizeToRepresentative` transformer (here)
+2. Added the [sensitivity_weights.ipynb](./notebooks/contribution/sensitivity_weights.ipynb) notebook to demonstrate the benefit of this contribution.
+
+
+### Dynamic Generalization
+> Currently, even with proper generalizations, the potential user still has to send ALL of their information for it to be abstracted away using the surrogate model. Instead, we use the fitted surrogate model to dynamically update generalizations and the need for additional information based on partial user inputs.
+>
+> **This approach allows us to make "dynamic forms" that ask for only the information that is trully needed, thus minimizing the data collection in the truest form! **
+
+We add the `get_dynamic_generalizations(known_features: dict)` function which dynamically calculates the best generalizations for the remaining features based on the provided partial feature values.
+
+Under the hood, it takes the current leves (i.e. cells) of the surrogate model and eliminates those for which the `known_features` are outside their ranges. Then we recalculate the generalizations for the surviving leaves. It may be that all of surviving leaves point to the same label, meaning that we can use the currently known features to get the final prediction - eliminating the need for asking for all of the information!
+
+```python
+current_form = minimizer.get_dynamic_generalizations({"age": 32})
+
+# print(current_form["ranges"]) will print consolidated generalizations
+# that will be more general!
+
+if current_form.get("status") == "Complete":
+  print("No more info needed!")
+else:
+  print("Need additional known features")
+```
+
+Please look at the [dynamic_forms.ipynb](./notebooks/contribution/dynamic_forms.ipynb) for a working example of dynamic forms!
+
+
+#### Contribution glossary
+1. Added the `get_dynamic_generalizations` function to calculate generalizations based on partial inputs (here)
+2. Added the [dynamic_forms.ipymb](./notebooks/contribution/dynamic_forms.ipynb) to  demonstrate the benefit of this contribution.
+
+
 
 Citation
 --------
