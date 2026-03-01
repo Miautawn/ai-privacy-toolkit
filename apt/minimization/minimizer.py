@@ -85,6 +85,9 @@ class GeneralizeToRepresentative(BaseEstimator, MetaEstimatorMixin, TransformerM
     :type guaranteed_k_anonymity: int, optional. If provided, will limit the minimum number of datapoints in the DT leaves.
                                     This increases the generalization outright reducing the need for DT uprooting,
                                     but has a direct tradeoff in accuracy
+    :type sensitivity_weights: Dict, optional. If provided, will prioritise removing features with the lowest sensitivity weights
+                                    during accuracy improvement step
+
     """
 
     def __init__(
@@ -100,6 +103,7 @@ class GeneralizeToRepresentative(BaseEstimator, MetaEstimatorMixin, TransformerM
         is_regression: Optional[bool] = False,
         generalize_using_transform: bool = True,
         guaranteed_k_anonymity: Optional[int] = 1,
+        sensitivity_weights: Optional[dict] = {},
     ):
         self.estimator = estimator
         if estimator is not None and not issubclass(estimator.__class__, Model):
@@ -135,6 +139,7 @@ class GeneralizeToRepresentative(BaseEstimator, MetaEstimatorMixin, TransformerM
         self._features = None
         self._level = 0
         self.guaranteed_k_anonymity = guaranteed_k_anonymity
+        self.sensitivity_weights = sensitivity_weights
 
         assert self.guaranteed_k_anonymity >= 1, (
             "guaranteed_k_anonymity should be at least 1"
@@ -662,8 +667,12 @@ class GeneralizeToRepresentative(BaseEstimator, MetaEstimatorMixin, TransformerM
     def _calc_ncp_for_generalization(
         self, generalization, range_counts, category_counts, total_count
     ):
+        # CONTRIBUTION: Calculate final NCP via weighted average of sensitivity weights
         total_ncp = 0
-        total_features = len(generalization["untouched"])
+        total_weight = sum(
+            [self.sensitivity_weights.get(f, 1.0) for f in generalization["untouched"]]
+        )
+
         ranges = generalization["ranges"]
         categories = generalization["categories"]
 
@@ -675,8 +684,10 @@ class GeneralizeToRepresentative(BaseEstimator, MetaEstimatorMixin, TransformerM
                 self._feature_data[feature],
                 total_count,
             )
-            total_ncp = total_ncp + feature_ncp
-            total_features += 1
+            weight = self.sensitivity_weights.get(feature, 1.0)
+            total_ncp += feature_ncp * weight
+            total_weight += weight
+
         for feature in categories.keys():
             feature_ncp = self._calc_ncp_categorical(
                 categories[feature],
@@ -684,11 +695,13 @@ class GeneralizeToRepresentative(BaseEstimator, MetaEstimatorMixin, TransformerM
                 self._feature_data[feature],
                 total_count,
             )
-            total_ncp = total_ncp + feature_ncp
-            total_features += 1
-        if total_features == 0:
+            weight = self.sensitivity_weights.get(feature, 1.0)
+            total_ncp += feature_ncp * weight
+            total_weight += weight
+
+        if total_weight == 0:
             return 0
-        return total_ncp / total_features
+        return total_ncp / total_weight
 
     @staticmethod
     def _calc_ncp_categorical(categories, category_count, feature_data, total):
@@ -1254,11 +1267,11 @@ class GeneralizeToRepresentative(BaseEstimator, MetaEstimatorMixin, TransformerM
         return all_sample_indexes
 
     def _map_to_cells(self, samples, nodes, cells_by_id):
-        mapping_to_cells = {}
-        for index, row in samples.iterrows():
-            cell = self._find_sample_cells([row], nodes, cells_by_id)[0]
-            mapping_to_cells[index] = cell
-        return mapping_to_cells
+        # CONTRIBUTION: use vectorized math to speed up
+        cells = self._find_sample_cells(samples, nodes, cells_by_id)
+
+        mapping = {index: cell for index, cell in zip(samples.index, cells)}
+        return mapping
 
     def _find_sample_cells(self, samples, nodes, cells_by_id):
         node_ids = self._find_sample_nodes(samples, nodes)
@@ -1312,11 +1325,22 @@ class GeneralizeToRepresentative(BaseEstimator, MetaEstimatorMixin, TransformerM
         categories = self.generalizations["categories"]
         category_counts = self._find_category_counts(original_data, categories)
 
+        # --- CONTRIBUTION: Precompute cell counts and generalizations ONCE ---
+        # This greatly speeds up the elimintation process.
+        # Original code computed the same info for each feature, for each cell!!!!
+        cell_counts = Counter(self._find_sample_nodes(prepared_data, nodes))
+        cell_generalizations = self._calculate_cell_generalizations()
+        total_samples = original_data.shape[0]
+
         for feature in ranges.keys():
             if feature not in self._generalizations["untouched"]:
                 if generalize_using_transform:
                     feature_ncp = self._calculate_ncp_for_feature_from_cells(
-                        feature, feature_data, original_data
+                        feature,
+                        feature_data,
+                        total_samples,
+                        cell_counts,
+                        cell_generalizations,
                     )
                 else:
                     feature_ncp = self._calc_ncp_numeric(
@@ -1325,6 +1349,12 @@ class GeneralizeToRepresentative(BaseEstimator, MetaEstimatorMixin, TransformerM
                         feature_data[feature],
                         total,
                     )
+
+                # CONTRIBUTION: Apply sensitivity weight to NCP before normalizing by accuracy gain
+                # this allows us to deprioritize contextually sensitive features
+                weight = self.sensitivity_weights.get(feature, 1.0)
+                feature_ncp = feature_ncp * weight
+
                 if feature_ncp > 0:
                     feature_ncp = self._normalize_ncp_by_accuracy_gain(
                         original_data,
@@ -1344,7 +1374,11 @@ class GeneralizeToRepresentative(BaseEstimator, MetaEstimatorMixin, TransformerM
             if feature not in self.generalizations["untouched"]:
                 if generalize_using_transform:
                     feature_ncp = self._calculate_ncp_for_feature_from_cells(
-                        feature, feature_data, original_data
+                        feature,
+                        feature_data,
+                        total_samples,
+                        cell_counts,
+                        cell_generalizations,
                     )
                 else:
                     feature_ncp = self._calc_ncp_categorical(
@@ -1353,6 +1387,10 @@ class GeneralizeToRepresentative(BaseEstimator, MetaEstimatorMixin, TransformerM
                         feature_data[feature],
                         total,
                     )
+
+                weight = self.sensitivity_weights.get(feature, 1.0)
+                feature_ncp = feature_ncp * weight
+
                 if feature_ncp > 0:
                     feature_ncp = self._normalize_ncp_by_accuracy_gain(
                         original_data,
@@ -1374,29 +1412,34 @@ class GeneralizeToRepresentative(BaseEstimator, MetaEstimatorMixin, TransformerM
         )
         return remove_feature
 
-    def _calculate_ncp_for_feature_from_cells(self, feature, feature_data, samples_pd):
-        # count how many records are mapped to each cell
-        counted = np.zeros(samples_pd.shape[0])  # to mark records we already counted
-        total = samples_pd.shape[0]
+    def _calculate_ncp_for_feature_from_cells(
+        self, feature, feature_data, total_samples, cell_counts, cell_generalizations
+    ):
         feature_ncp = 0
         for cell in self.cells:
-            count = self._get_record_count_for_cell(samples_pd, cell, counted)
-            generalizations = self._calculate_generalizations_for_cell(cell)
+            # Instantly lookup the count and generalizations instead of calculating them
+            count = cell_counts.get(cell["id"], 0)
+            generalizations = cell_generalizations[cell["id"]]
+
             cell_ncp = 0
             if feature in cell["ranges"]:
                 cell_ncp = self._calc_ncp_numeric(
                     generalizations["ranges"][feature],
                     [count],
                     feature_data[feature],
-                    total,
+                    total_samples,
                 )
             elif feature in cell["categories"]:
-                cell_ncp = self._calc_ncp_categorical(
-                    generalizations["categories"][feature],
-                    [count],
-                    feature_data[feature],
-                    total,
-                )
+                # Check if the feature was purged by _remove_categorical_untouched
+                if feature in generalizations["categories"]:
+                    cell_ncp = self._calc_ncp_categorical(
+                        generalizations["categories"][feature],
+                        [count],
+                        feature_data[feature],
+                        total_samples,
+                    )
+                else:
+                    cell_ncp = 0
             feature_ncp += cell_ncp
         return feature_ncp
 
@@ -1649,6 +1692,84 @@ class GeneralizeToRepresentative(BaseEstimator, MetaEstimatorMixin, TransformerM
                     category_representatives[feature].append(partition[0])  # random
             categories[feature] = partitions
         return categories, category_representatives
+
+    def get_dynamic_generalizations(self, known_user_inputs: dict) -> dict:
+        """
+        CONTRIBUTION:
+        Dynamically calculates the best generalizations for the remaining features
+        based on the provided partial feature values.
+
+        Can be used to implement dynamic questioning forms
+        that adapt to the user's answers in real-time, providing the most relevant generalizations
+        and limiting the number of information required to begin with.
+
+        Arguments:
+            known_user_inputs (dict): Partial feature values (e.g. {'age': 32})
+
+        Returns:
+            dict: A dictionary containing:
+                - 'status': 'Complete' if a prediction can be made, 'Incomplete' otherwise
+                - 'prediction': The predicted label(s) if status is 'Complete'
+                - 'message': Additional information about the status
+                - 'ranges': Updated generalizations for numeric features
+                - 'categories': Updated generalizations for categorical features
+        """
+        # Step 1: Find which cells are still mathematically valid given the user's input
+        valid_cells = []
+        for cell in self.cells:
+            is_valid = True
+            for feature, value in known_user_inputs.items():
+                if feature in cell["ranges"]:
+                    start = cell["ranges"][feature]["start"]
+                    end = cell["ranges"][feature]["end"]
+                    if start is not None and value <= start:
+                        is_valid = False
+                    if end is not None and value > end:
+                        is_valid = False
+                elif feature in cell["categories"]:
+                    if value not in cell["categories"][feature]:
+                        is_valid = False
+
+            if is_valid:
+                valid_cells.append(cell)
+
+        if not valid_cells:
+            return {"status": "Error: Inputs do not match any known tree paths."}
+
+        # Step 2: Recalculate generalizations only for surviving cells
+        ranges, _ = self._calculate_ranges(valid_cells)
+        categories, _ = self._calculate_categories(valid_cells)
+
+        # Step 3: Format the output for the remaining (unanswered) features
+        dynamic_generalizations = {"ranges": {}, "categories": {}}
+
+        for feature, r in ranges.items():
+            if feature not in known_user_inputs:
+                dynamic_generalizations["ranges"][feature] = r
+
+        for feature, c in categories.items():
+            if feature not in known_user_inputs:
+                dynamic_generalizations["categories"][feature] = c
+
+        # Step 4: Check if the model has enough data to make a final prediction
+        # Get all unique predictions from the remaining valid cells
+        possible_labels = []
+        for cell in valid_cells:
+            label = cell["label"] if isinstance(cell["label"], list) else cell["label"]
+            if label not in possible_labels:
+                possible_labels.append(label)
+
+        if len(possible_labels) == 1:
+            dynamic_generalizations["status"] = "Complete"
+            dynamic_generalizations["prediction"] = possible_labels
+            dynamic_generalizations["message"] = (
+                "Prediction reached. No further data required."
+            )
+        else:
+            dynamic_generalizations["status"] = "Incomplete"
+            dynamic_generalizations["message"] = "More data required."
+
+        return dynamic_generalizations
 
     @staticmethod
     def _get_other_features_in_encoding(feature, feature_slices):
