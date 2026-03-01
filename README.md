@@ -65,7 +65,6 @@ This fork offers the following contributions:
 
 - [Sensitvity Weights](#guaranteed-k-anonymity) - adds a new parameter `sensitivity_weights` to the `GeneralizeToRepresentative` class that allows discouraging the accuracy improvement algorithm from degeneralizing contextually sensitive features.
 
-
 - [Dynamic Generalization](#dynamic-generalization) - adds a `get_dynamic_generalizations` function that dynamically calculates & updates generalizations based on provided partial feature values.
 
 > **NOTE**: Most of the contributions are linked to the code changes in the **glossary** sections. However, you can find all the changes by viewing the main [minimizer.py](./apt/minimization/minimizer.py) script and searching for "CONTRIBUTION" tags
@@ -84,11 +83,11 @@ poetry run pre-commit install
 After which, you can run a proper generalization example via [minimization_adult_new.ipynb](./notebooks/contribution/minimization_adult_new.ipynb) notebook.
 
 #### Contribution glossary
-1. Introduced proper dependency locking via [Poetry](https://python-poetry.org/) and updated dependencies (here)
-2. Added code automated code formatting ([here](./pyproject.toml))
-3. Made new package compatability changes (mainly for newer numpy versions) (here)
-4. Resolved the `UserWarnings` that were caused by fitting the minimizer with named features while running inference on raw numpy arrays (here)
-5. **Optimized key calculations to use vectorized math operations inside the "accuracy improvement" loop of `GeneralizeToRepresentative`.** This allows the minimization algorithm to run on normal-sized datasets (previously even 1k of data points would take minutes) (here)
+1. Introduced proper dependency locking via [Poetry](https://python-poetry.org/) and updated dependencies ([here](https://github.com/Miautawn/ai-privacy-toolkit/blob/main/pyproject.toml))
+2. Added code automated code formatting ([here](https://github.com/Miautawn/ai-privacy-toolkit/blob/main/.pre-commit-config.yaml))
+3. Made new package compatability changes (mainly for newer numpy versions) ([here](https://github.com/Miautawn/ai-privacy-toolkit/blob/29032e677eeef50bd8d0adf5a155aac99175a699/apt/minimization/minimizer.py#L784))
+4. Resolved the `UserWarnings` that were caused by fitting the minimizer with named features while running inference on raw numpy arrays ([here](https://github.com/Miautawn/ai-privacy-toolkit/blob/29032e677eeef50bd8d0adf5a155aac99175a699/apt/minimization/minimizer.py#L401))
+5. **Optimized key calculations to use vectorized math operations inside the "accuracy improvement" loop of `GeneralizeToRepresentative`.** This allows the minimization algorithm to run on normal-sized datasets (previously even 1k of data points would take minutes) ([here](https://github.com/Miautawn/ai-privacy-toolkit/blob/29032e677eeef50bd8d0adf5a155aac99175a699/apt/minimization/minimizer.py#L1328))
 6. Added `calculate_disclosure_risk` function to calculate the "Disclosure Risk" metric as introduced in the original paper ([here](./apt/utils/metrics/metrics.py)).
 7. Added an updated [minimization_adult_new.ipynb](./notebooks/contribution/minimization_adult_new.ipynb) notebook to demonstrate working base functionality after above changes ([here](./notebooks/contribution/minimization_adult_new.ipynb))
 
@@ -118,7 +117,7 @@ def fit():
 Please see a working example in the [guaranteed_k_anonymity.ipynb](./notebooks/contribution/guaranteed_k_anonymity.ipynb) notebook for more details It shows you how increasing this paramter can lead to better generalization (i.e. reduced disclosure risk) and lower loss of accuracy.
 
 #### Contribution glossary
-1. Added the `guaranteed_k_anonymity` parameter to the original `GeneralizeToRepresentative` transformer (here)
+1. Added the `guaranteed_k_anonymity` parameter to the original `GeneralizeToRepresentative` transformer ([here](https://github.com/Miautawn/ai-privacy-toolkit/blob/29032e677eeef50bd8d0adf5a155aac99175a699/apt/minimization/minimizer.py#L381))
 2. Added the [guaranteed_k_anonymity.ipynb](./notebooks/contribution/guaranteed_k_anonymity.ipynb) notebook to demonstrate the benefit of this contribution.
 
 ### Sensitvity Weights
@@ -163,7 +162,7 @@ def _calc_ncp_for_generalization():
 Please see a working example in [sensitivity_weights.ipynb](./notebooks/contribution/sensitivity_weights.ipynb) notebook.
 
 #### Contribution glossary
-1. Added the `sensitivity_weights` parameter to the original `GeneralizeToRepresentative` transformer (here)
+1. Added the `sensitivity_weights` parameter to the original `GeneralizeToRepresentative` transformer ([here](https://github.com/Miautawn/ai-privacy-toolkit/blob/29032e677eeef50bd8d0adf5a155aac99175a699/apt/minimization/minimizer.py#L1353))
 2. Added the [sensitivity_weights.ipynb](./notebooks/contribution/sensitivity_weights.ipynb) notebook to demonstrate the benefit of this contribution.
 
 
@@ -192,7 +191,7 @@ Please look at the [dynamic_forms.ipynb](./notebooks/contribution/dynamic_forms.
 
 
 #### Contribution glossary
-1. Added the `get_dynamic_generalizations` function to calculate generalizations based on partial inputs (here)
+1. Added the `get_dynamic_generalizations` function to calculate generalizations based on partial inputs ([here](https://github.com/Miautawn/ai-privacy-toolkit/blob/29032e677eeef50bd8d0adf5a155aac99175a699/apt/minimization/minimizer.py#L1696))
 2. Added the [dynamic_forms.ipymb](./notebooks/contribution/dynamic_forms.ipynb) to  demonstrate the benefit of this contribution.
 
 
